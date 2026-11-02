@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admissions Desk</title>
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --ink:#1d2330; --muted:#636b7a; --line:#e3e4e8; --accent:#2f5bd3; --warn:#c2410c; --ok:#15803d; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161b; --card:#1d2027; --ink:#e8eaf0; --muted:#9aa1ae; --line:#2c3039; --accent:#7ea2ff; --warn:#fb923c; --ok:#4ade80; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width:1080px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:15px; margin:0 0 12px; }
+  .sub { color:var(--muted); margin:0 0 20px; font-size:13px; }
+  .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .wide { grid-column:1 / -1; }
+  .kpis { display:flex; gap:24px; flex-wrap:wrap; }
+  .kpi b { display:block; font-size:24px; } .kpi span { color:var(--muted); font-size:12px; }
+  .bar { display:grid; grid-template-columns:120px 1fr 48px; gap:8px; align-items:center; margin:6px 0; font-size:13px; }
+  .bar i { display:block; height:18px; background:var(--accent); border-radius:4px; }
+  .step { color:var(--muted); font-size:12px; margin:-2px 0 4px 128px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; }
+  .warn { color:var(--warn); font-weight:600; } .ok { color:var(--ok); }
+  .note { color:var(--muted); font-size:12px; margin-top:16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Admissions Desk</h1>
+  <p class="sub" id="asof">Loading…</p>
+  <div class="grid">
+    <section class="card wide"><div class="kpis" id="kpis"></div></section>
+    <section class="card"><h2>Enquiry to enrolment</h2><div id="funnel"></div></section>
+    <section class="card"><h2>Why families were lost</h2><div id="lost"></div></section>
+    <section class="card"><h2>By counsellor</h2><table id="couns"></table></section>
+    <section class="card"><h2>By source</h2><table id="sources"></table></section>
+    <section class="card wide"><h2>Overdue follow-ups</h2><table id="fu"></table></section>
+  </div>
+  <p class="note">Synthetic data for a fictional school. Phone numbers are masked.</p>
+</main>
+<script>
+const pct = x => x == null ? "–" : Math.round(x * 100) + "%";
+const label = s => s.replace(/_/g, " ");
+const hrs = m => m == null ? "–" : m >= 540 ? (m / 540).toFixed(1) + " working days" : m >= 60 ? (m / 60).toFixed(1) + " h" : m + " min";
+async function load(api, file) {
+  try { const r = await fetch(api); if (r.ok) return r.json(); } catch (e) {}
+  return (await fetch(file)).json();
+}
+(async () => {
+  const [rep, fu] = await Promise.all([load("api/report", "report.json"), load("api/follow-ups", "follow-ups.json")]);
+  document.getElementById("asof").textContent = "As of " + new Date(rep.as_of).toLocaleString("en-IN");
+  const f = rep.funnel, fr = rep.first_response_working_minutes;
+  document.getElementById("kpis").innerHTML = [
+    [f.enquiry, "enquiries"], [f.enrolled, "enrolled"], [pct(f.enrolled / f.enquiry), "enquiry → enrolment"],
+    [hrs(fr.median), "median first call (office time)"], [fr.within_target_pct + "%", "called within 1 hour"],
+    [rep.overdue_follow_ups, "follow-ups overdue"],
+  ].map(([v, l]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
+  const max = f.enquiry || 1;
+  document.getElementById("funnel").innerHTML = Object.entries(f).map(([s, n], i) =>
+    (i ? `<div class="step">${pct(rep.step_conversion[i - 1].rate)} moved on</div>` : "") +
+    `<div class="bar"><span>${label(s)}</span><i style="width:${100 * n / max}%"></i><span>${n}</span></div>`).join("");
+  const lostMax = Math.max(1, ...Object.values(rep.lost_reasons));
+  document.getElementById("lost").innerHTML = Object.entries(rep.lost_reasons).map(([r, n]) =>
+    `<div class="bar"><span>${label(r)}</span><i style="width:${100 * n / lostMax}%;background:var(--warn)"></i><span>${n}</span></div>`).join("");
+  document.getElementById("couns").innerHTML = "<tr><th>Counsellor</th><th>First call</th><th>Open</th><th>Overdue</th><th>Enrolled</th></tr>" +
+    Object.entries(rep.by_counsellor).map(([c, v]) =>
+      `<tr><td>${c}</td><td>${hrs(v.median_first_call_minutes)}</td><td>${v.open || 0}</td><td class="${v.overdue ? "warn" : ""}">${v.overdue || 0}</td><td>${v.enrolled || 0}</td></tr>`).join("");
+  document.getElementById("sources").innerHTML = "<tr><th>Source</th><th>Enquiries</th><th>Enrolled</th><th>Conversion</th></tr>" +
+    Object.entries(rep.by_source).map(([s, v]) =>
+      `<tr><td>${label(s)}</td><td>${v.enquiries}</td><td>${v.enrolled}</td><td>${pct(v.conversion)}</td></tr>`).join("");
+  document.getElementById("fu").innerHTML = "<tr><th>Parent</th><th>Phone</th><th>Grade</th><th>Stage</th><th>Counsellor</th><th>Overdue by</th></tr>" +
+    fu.slice(0, 15).map(x => `<tr><td>${x.parent}</td><td>${x.phone}</td><td>${x.grade || "–"}</td><td>${label(x.stage)}</td><td>${x.counsellor}</td><td class="warn">${hrs(x.overdue_working_minutes)}</td></tr>`).join("") ||
+    `<tr><td class="ok" colspan="6">Nothing overdue.</td></tr>`;
+})();
+</script>
+</body>
+</html>

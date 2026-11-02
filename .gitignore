@@ -1,0 +1,6 @@
+__pycache__/
+.pytest_cache/
+*.db
+.venv/
+web/report.json
+web/follow-ups.json
